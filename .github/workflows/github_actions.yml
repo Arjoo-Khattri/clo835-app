@@ -91,9 +91,10 @@ jobs:
     
           echo "Waiting for MySQL to initialize..."
           sleep 30
-    
+          EOF
+          
           # Initialize database
-          cat > init.sql << EOT
+          cat > init.sql << 'EOT'
           CREATE DATABASE IF NOT EXISTS mydb;
           USE mydb;
           CREATE TABLE IF NOT EXISTS employee (
@@ -144,4 +145,3 @@ jobs:
           # Verify deployment
           echo "Checking running containers..."
           docker ps
-          EOF
