@@ -1,0 +1,168 @@
+name: Deploy to ECR
+# updated ECR Repo week3-1 01/22
+on: 
+  pull_request:
+    branches: [ main ]
+    types: [ closed ]
+
+jobs:
+  
+  build:
+    if: github.event.pull_request.merged == true
+    name: Build Image
+    runs-on: ubuntu-latest
+    steps:
+
+    - name: Check out code
+      uses: actions/checkout@v4
+
+    - name: Login to Amazon ECR
+      id: login-ecr
+      uses: aws-actions/amazon-ecr-login@v1
+      env:
+        AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        AWS_SESSION_TOKEN: ${{ secrets.AWS_SESSION_TOKEN }}
+        AWS_REGION: us-east-1
+
+    - name: Build, test, tag, and push image to Amazon ECR
+      env:
+        ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+        ECR_REPOSITORY_MYSQL: webapp-repo
+        ECR_REPOSITORY_WEBAPP: mysql-repo
+        IMAGE_TAG: v0.1
+      run: |
+        # Docker build command
+        docker build -t $ECR_REGISTRY/$ECR_REPOSITORY_MYSQL:$IMAGE_TAG -f Dockerfile_mysql .
+        docker build -t $ECR_REGISTRY/$ECR_REPOSITORY_WEBAPP:$IMAGE_TAG Dockerfile .
+
+        # push commands
+        docker push $ECR_REGISTRY/$ECR_REPOSITORY_MYSQL:$IMAGE_TAG
+        docker push $ECR_REGISTRY/$ECR_REPOSITORY_WEBAPP:$IMAGE_TAG
+
+    - name: Setting up key file for ssh connection to EC2
+      run: |
+        echo "${{ secrets.SSH_KEY_FILE }}" > ./key_file.pem
+        chmod 400 ./key_file.pem
+
+    - name: Connect to EC2 instance and Containerize the SQL and Webapp
+      run: |
+        # Create AWS CLI configuration script
+        cat > deploy.sh << 'DEPLOY'
+        #!/bin/bash
+        
+        # Setup AWS credentials
+        echo "Configuring AWS credentials..."
+        aws configure set aws_access_key_id ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws configure set aws_secret_access_key ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws configure set aws_session_token ${{ secrets.AWS_SESSION_TOKEN }}
+        aws configure set region us-east-1
+
+        # Install and configure Docker
+        echo "Setting up Docker..."
+        sudo yum update -y
+        sudo yum install -y docker
+        sudo systemctl start docker
+        sudo systemctl enable docker
+        sudo usermod -aG docker ec2-user
+
+        # Login to ECR
+        echo "Logging into ECR..."
+        aws ecr get-login-password --region us-east-1 | sudo docker login --username AWS --password-stdin ${{ steps.login-ecr.outputs.registry }}
+
+        # Create network
+        echo "Setting up Docker network..."
+        sudo docker network create mynetwork || true
+
+        # Pull images
+        echo "Pulling container images..."
+        sudo docker pull ${{ steps.login-ecr.outputs.registry }}/mysql-repo:v1.0
+        sudo docker pull ${{ steps.login-ecr.outputs.registry }}/webapp-repo:v1.0
+
+        # Start MySQL with initialization
+        echo "Starting MySQL container..."
+        sudo docker run -d --name sql --network mynetwork \
+          -e MYSQL_ROOT_PASSWORD=my-secret-pw \
+          -e MYSQL_DATABASE=mydb \
+          -p 3306:3306 \
+          ${{ steps.login-ecr.outputs.registry }}/mysql-repo:v1.0
+
+        echo "Waiting for MySQL initialization..."
+        sleep 30
+
+        # Initialize database
+        echo "Initializing database..."
+        cat > init.sql << 'EOF'
+        CREATE DATABASE IF NOT EXISTS mydb;
+        USE mydb;
+        CREATE TABLE IF NOT EXISTS employee (
+            emp_id VARCHAR(20) PRIMARY KEY,
+            first_name VARCHAR(100),
+            last_name VARCHAR(100),
+            primary_skill VARCHAR(100),
+            location VARCHAR(100)
+        );
+        EOF
+        
+        sudo docker cp init.sql sql:/init.sql
+        sudo docker exec sql mysql -uroot -pmy-secret-pw < /init.sql
+
+        # Start webapp containers
+        echo "Starting webapp containers..."
+        # Blue container
+        sudo docker run -d --name blue-webapp --network mynetwork \
+          -e APP_COLOR=blue \
+          -e DBHOST=sql \
+          -e DBPORT=3306 \
+          -e DBUSER=root \
+          -e DBPWD=my-secret-pw \
+          -e DATABASE=mydb \
+          -p 8081:8080 \
+          ${{ steps.login-ecr.outputs.registry }}/webapp-repo:v1.0
+
+        # Pink container
+        sudo docker run -d --name pink-webapp --network mynetwork \
+          -e APP_COLOR=pink \
+          -e DBHOST=sql \
+          -e DBPORT=3306 \
+          -e DBUSER=root \
+          -e DBPWD=my-secret-pw \
+          -e DATABASE=mydb \
+          -p 8082:8080 \
+          ${{ steps.login-ecr.outputs.registry }}/webapp-repo:v1.0
+
+        # Lime container
+        sudo docker run -d --name lime-webapp --network mynetwork \
+          -e APP_COLOR=lime \
+          -e DBHOST=sql \
+          -e DBPORT=3306 \
+          -e DBUSER=root \
+          -e DBPWD=my-secret-pw \
+          -e DATABASE=mydb \
+          -p 8083:8080 \
+          ${{ steps.login-ecr.outputs.registry }}/webapp-repo:v1.0
+
+        echo "Verifying deployment..."
+        sudo docker ps
+        DEPLOY
+
+        # Make script executable
+        chmod +x deploy.sh
+
+        # Send script to EC2 using AWS Systems Manager
+        aws ssm send-command \
+          --instance-ids ${{ secrets.EC2_INSTANCE_ID }} \
+          --document-name "AWS-RunShellScript" \
+          --parameters commands="$(cat deploy.sh)" \
+          --output text
+
+        # Wait for command completion
+        echo "Waiting for deployment to complete..."
+        sleep 60
+
+        # Verify deployment
+        aws ssm send-command \
+          --instance-ids ${{ secrets.EC2_INSTANCE_ID }} \
+          --document-name "AWS-RunShellScript" \
+          --parameters commands="docker ps" \
+          --output text
