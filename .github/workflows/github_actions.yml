@@ -83,11 +83,7 @@ jobs:
           docker pull 813634909417.dkr.ecr.us-east-1.amazonaws.com/webapp-repo:v1.0
     
           # Start MySQL container
-          docker run -d --name sql --network mynetwork \
-            -e MYSQL_ROOT_PASSWORD=my-secret-pw \
-            -e MYSQL_DATABASE=mydb \
-            -p 3306:3306 \
-            813634909417.dkr.ecr.us-east-1.amazonaws.com/mysql-repo:v1.0
+          docker run -d --name sql --network mynetwork -e MYSQL_ROOT_PASSWORD=my-secret-pw -e MYSQL_DATABASE=mydb -p 3306:3306 ${{ steps.login-ecr.outputs.registry }}/mysql-repo:v1.0
     
           echo "Waiting for MySQL to initialize..."
           sleep 30
@@ -110,37 +106,13 @@ jobs:
           docker exec sql mysql -uroot -pmy-secret-pw < init.sql
     
           # Start Blue container
-          docker run -d --name blue-webapp --network mynetwork \
-            -e APP_COLOR=blue \
-            -e DBHOST=sql \
-            -e DBPORT=3306 \
-            -e DBUSER=root \
-            -e DBPWD=my-secret-pw \
-            -e DATABASE=mydb \
-            -p 8081:8080 \
-            813634909417.dkr.ecr.us-east-1.amazonaws.com/webapp-repo:v1.0
+          docker run -d --name blue-webapp --network mynetwork -e APP_COLOR=blue -e DBHOST=sql -e DBPORT=3306 -e DBUSER=root -e DBPWD=my-secret-pw -e DATABASE=mydb -p 8081:8080 ${{ steps.login-ecr.outputs.registry }}/webapp-repo:v1.0
     
           # Start Pink container
-          docker run -d --name pink-webapp --network mynetwork \
-            -e APP_COLOR=pink \
-            -e DBHOST=sql \
-            -e DBPORT=3306 \
-            -e DBUSER=root \
-            -e DBPWD=my-secret-pw \
-            -e DATABASE=mydb \
-            -p 8082:8080 \
-            813634909417.dkr.ecr.us-east-1.amazonaws.com/webapp-repo:v1.0
+          docker run -d --name pink-webapp --network mynetwork -e APP_COLOR=pink -e DBHOST=sql -e DBPORT=3306 -e DBUSER=root -e DBPWD=my-secret-pw -e DATABASE=mydb -p 8082:8080 ${{ steps.login-ecr.outputs.registry }}/webapp-repo:v1.0
     
           # Start Lime container
-          docker run -d --name lime-webapp --network mynetwork \
-            -e APP_COLOR=lime \
-            -e DBHOST=sql \
-            -e DBPORT=3306 \
-            -e DBUSER=root \
-            -e DBPWD=my-secret-pw \
-            -e DATABASE=mydb \
-            -p 8083:8080 \
-            813634909417.dkr.ecr.us-east-1.amazonaws.com/webapp-repo:v1.0
+          docker run -d --name lime-webapp --network mynetwork -e APP_COLOR=lime -e DBHOST=sql -e DBPORT=3306 -e DBUSER=root -e DBPWD=my-secret-pw -e DATABASE=mydb -p 8083:8080 ${{ steps.login-ecr.outputs.registry }}/webapp-repo:v1.0
     
           # Verify deployment
           echo "Checking running containers..."
