@@ -56,10 +56,10 @@ jobs:
         ssh-keyscan -H ${{ secrets.EC2_INSTANCE_ID }} >> ~/.ssh/known_hosts
         
         # SSH and deploy
-        ssh -i key_file.pem ec2-user@${{ secrets.EC2_INSTANCE_ID }} 
+        ssh -i key_file.pem ec2-user@${{ secrets.EC2_INSTANCE_ID }} << 'EOF'
           # Configure AWS credentials
           mkdir -p ~/.aws
-          cat > ~/.aws/credentials << EOT
+          cat > ~/.aws/credentials << 'EOT'
           [default]
           aws_access_key_id=${{ secrets.AWS_ACCESS_KEY_ID }}
           aws_secret_access_key=${{ secrets.AWS_SECRET_ACCESS_KEY }}
@@ -144,3 +144,4 @@ jobs:
           # Verify deployment
           echo "Checking running containers..."
           docker ps
+          EOF
