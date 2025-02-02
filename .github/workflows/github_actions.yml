@@ -8,7 +8,6 @@ on:
       - closed
 
 jobs:
-  
   build:
     if: github.event.pull_request.merged == true
     name: Build Image
@@ -47,97 +46,106 @@ jobs:
         echo "${{ secrets.SSH_KEY_FILE }}" > ./key_file.pem
         chmod 400 ./key_file.pem
 
-    - name: Connect to EC2 instance and Containerize the SQL and Webapp
-      run: |
-        # Setup SSH key
-        echo "${{ secrets.SSH_PRIVATE_KEY }}" > assignment1.pem
-        chmod 600 assignment1.pem
+   - name: Deploy to EC2 and Run Containers
+  run: |
+    # Debug EC2 hostname
+    echo "EC2 Public IP: ${{ secrets.EC2_PUBLIC_IP }}"
     
-        # SSH and deploy
-        ssh -o StrictHostKeyChecking=no -i assignment1.pem ec2-user@${{ secrets.EC2_PUBLIC_IP }} << 'EOF'
-          # Configure AWS credentials
-          mkdir -p ~/.aws
-          echo "[default]
-          aws_access_key_id=${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws_secret_access_key=${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws_session_token=${{ secrets.AWS_SESSION_TOKEN }}
-          region=us-east-1" > ~/.aws/credentials
-          
-          # Login to ECR
-          aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin 813634909417.dkr.ecr.us-east-1.amazonaws.com
+    # Setup SSH key
+    echo "${{ secrets.SSH_PRIVATE_KEY }}" > assignment1.pem
+    chmod 600 assignment1.pem
     
-          # Remove existing containers and network
-          docker rm -f $(docker ps -aq) || true
-          docker network rm mynetwork || true
+    # Add host to known_hosts
+    mkdir -p ~/.ssh
+    ssh-keyscan -H ${{ secrets.EC2_PUBLIC_IP }} >> ~/.ssh/known_hosts
     
-          # Create network
-          docker network create mynetwork
-    
-          # Pull latest images
-          docker pull 813634909417.dkr.ecr.us-east-1.amazonaws.com/mysql-repo:v1.0
-          docker pull 813634909417.dkr.ecr.us-east-1.amazonaws.com/webapp-repo:v1.0
-    
-          # Start MySQL container
-          docker run -d --name sql --network mynetwork \
-            -e MYSQL_ROOT_PASSWORD=my-secret-pw \
-            -e MYSQL_DATABASE=mydb \
-            -p 3306:3306 \
-            813634909417.dkr.ecr.us-east-1.amazonaws.com/mysql-repo:v1.0
-    
-          echo "Waiting for MySQL to initialize..."
-          sleep 30
-    
-          # Initialize database
-          cat > init.sql
-          CREATE DATABASE IF NOT EXISTS mydb;
-          USE mydb;
-          CREATE TABLE IF NOT EXISTS employee (
-              emp_id VARCHAR(20) PRIMARY KEY,
-              first_name VARCHAR(100),
-              last_name VARCHAR(100),
-              primary_skill VARCHAR(100),
-              location VARCHAR(100)
-          );
-          
-    
-          docker cp init.sql sql:/init.sql
-          docker exec sql mysql -uroot -pmy-secret-pw < init.sql
-    
-          # Start webapp containers with different colors
-          # Blue container
-          docker run -d --name blue-webapp --network mynetwork \
-            -e APP_COLOR=blue \
-            -e DBHOST=sql \
-            -e DBPORT=3306 \
-            -e DBUSER=root \
-            -e DBPWD=my-secret-pw \
-            -e DATABASE=mydb \
-            -p 8081:8080 \
-            813634909417.dkr.ecr.us-east-1.amazonaws.com/webapp-repo:v1.0
-    
-          # Pink container
-          docker run -d --name pink-webapp --network mynetwork \
-            -e APP_COLOR=pink \
-            -e DBHOST=sql \
-            -e DBPORT=3306 \
-            -e DBUSER=root \
-            -e DBPWD=my-secret-pw \
-            -e DATABASE=mydb \
-            -p 8082:8080 \
-            813634909417.dkr.ecr.us-east-1.amazonaws.com/webapp-repo:v1.0
-    
-          # Lime container
-          docker run -d --name lime-webapp --network mynetwork \
-            -e APP_COLOR=lime \
-            -e DBHOST=sql \
-            -e DBPORT=3306 \
-            -e DBUSER=root \
-            -e DBPWD=my-secret-pw \
-            -e DATABASE=mydb \
-            -p 8083:8080 \
-            813634909417.dkr.ecr.us-east-1.amazonaws.com/webapp-repo:v1.0
-    
-          # Check running containers
-          echo "Verifying deployment..."
-          docker ps
-          EOF
+    # SSH and deploy
+    ssh -i assignment1.pem ec2-user@${{ secrets.EC2_PUBLIC_IP }} '
+      # Configure AWS credentials
+      mkdir -p ~/.aws
+      cat > ~/.aws/credentials << EOT
+      [default]
+      aws_access_key_id=${{ secrets.AWS_ACCESS_KEY_ID }}
+      aws_secret_access_key=${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      aws_session_token=${{ secrets.AWS_SESSION_TOKEN }}
+      region=us-east-1
+      EOT
+      chmod 600 ~/.aws/credentials
+
+      # Login to ECR
+      aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin 813634909417.dkr.ecr.us-east-1.amazonaws.com
+
+      # Cleanup existing containers and network
+      docker rm -f $(docker ps -aq) || true
+      docker network rm mynetwork || true
+
+      # Create network
+      docker network create mynetwork
+
+      # Pull latest images
+      docker pull 813634909417.dkr.ecr.us-east-1.amazonaws.com/mysql-repo:v1.0
+      docker pull 813634909417.dkr.ecr.us-east-1.amazonaws.com/webapp-repo:v1.0
+
+      # Start MySQL container
+      docker run -d --name sql --network mynetwork \
+        -e MYSQL_ROOT_PASSWORD=my-secret-pw \
+        -e MYSQL_DATABASE=mydb \
+        -p 3306:3306 \
+        813634909417.dkr.ecr.us-east-1.amazonaws.com/mysql-repo:v1.0
+
+      echo "Waiting for MySQL to initialize..."
+      sleep 30
+
+      # Initialize database
+      cat > init.sql << EOT
+      CREATE DATABASE IF NOT EXISTS mydb;
+      USE mydb;
+      CREATE TABLE IF NOT EXISTS employee (
+          emp_id VARCHAR(20) PRIMARY KEY,
+          first_name VARCHAR(100),
+          last_name VARCHAR(100),
+          primary_skill VARCHAR(100),
+          location VARCHAR(100)
+      );
+      EOT
+
+      docker cp init.sql sql:/init.sql
+      docker exec sql mysql -uroot -pmy-secret-pw < init.sql
+
+      # Start Blue container
+      docker run -d --name blue-webapp --network mynetwork \
+        -e APP_COLOR=blue \
+        -e DBHOST=sql \
+        -e DBPORT=3306 \
+        -e DBUSER=root \
+        -e DBPWD=my-secret-pw \
+        -e DATABASE=mydb \
+        -p 8081:8080 \
+        813634909417.dkr.ecr.us-east-1.amazonaws.com/webapp-repo:v1.0
+
+      # Start Pink container
+      docker run -d --name pink-webapp --network mynetwork \
+        -e APP_COLOR=pink \
+        -e DBHOST=sql \
+        -e DBPORT=3306 \
+        -e DBUSER=root \
+        -e DBPWD=my-secret-pw \
+        -e DATABASE=mydb \
+        -p 8082:8080 \
+        813634909417.dkr.ecr.us-east-1.amazonaws.com/webapp-repo:v1.0
+
+      # Start Lime container
+      docker run -d --name lime-webapp --network mynetwork \
+        -e APP_COLOR=lime \
+        -e DBHOST=sql \
+        -e DBPORT=3306 \
+        -e DBUSER=root \
+        -e DBPWD=my-secret-pw \
+        -e DATABASE=mydb \
+        -p 8083:8080 \
+        813634909417.dkr.ecr.us-east-1.amazonaws.com/webapp-repo:v1.0
+
+      # Verify deployment
+      echo "Checking running containers..."
+      docker ps
+    '
