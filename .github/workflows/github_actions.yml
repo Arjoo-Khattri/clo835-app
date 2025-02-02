@@ -60,7 +60,7 @@ jobs:
     ssh-keyscan -H ${{ secrets.EC2_PUBLIC_IP }} >> ~/.ssh/known_hosts
     
     # SSH and deploy
-    ssh -i assignment1.pem ec2-user@${{ secrets.EC2_PUBLIC_IP }} '
+    ssh -i assignment1.pem ec2-user@${{ secrets.EC2_PUBLIC_IP }} 
       # Configure AWS credentials
       mkdir -p ~/.aws
       cat > ~/.aws/credentials << EOT
@@ -148,4 +148,3 @@ jobs:
       # Verify deployment
       echo "Checking running containers..."
       docker ps
-    '
