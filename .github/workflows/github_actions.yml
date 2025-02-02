@@ -1,5 +1,5 @@
 name: Deploy to ECR
-# updated ECR Repo week3-1 01/22
+# Updated ECR Repo week3-1 01/22
 on: 
   pull_request:
     branches:
@@ -10,10 +10,9 @@ on:
 jobs:
   build:
     if: github.event.pull_request.merged == true
-    name: Build Image
+    name: Build and Deploy
     runs-on: ubuntu-latest
     steps:
-
     - name: Check out code
       uses: actions/checkout@v4
 
@@ -26,37 +25,34 @@ jobs:
         AWS_SESSION_TOKEN: ${{ secrets.AWS_SESSION_TOKEN }}
         AWS_REGION: us-east-1
 
-    - name: Build, test, tag, and push image to Amazon ECR
+    - name: Build, tag, and push images to Amazon ECR
       env:
         ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-        ECR_REPOSITORY_MYSQL: webapp-repo
-        ECR_REPOSITORY_WEBAPP: mysql-repo
+        ECR_REPOSITORY_MYSQL: mysql-repo
+        ECR_REPOSITORY_WEBAPP: webapp-repo
         IMAGE_TAG: v0.1
       run: |
-        # Docker build command
         docker build -t $ECR_REGISTRY/$ECR_REPOSITORY_MYSQL:$IMAGE_TAG -f Dockerfile_mysql .
         docker build -t $ECR_REGISTRY/$ECR_REPOSITORY_WEBAPP:$IMAGE_TAG -f Dockerfile .
-
-        # push commands
+        
         docker push $ECR_REGISTRY/$ECR_REPOSITORY_MYSQL:$IMAGE_TAG
         docker push $ECR_REGISTRY/$ECR_REPOSITORY_WEBAPP:$IMAGE_TAG
 
-    - name: Setting up key file for ssh connection to EC2
+    - name: Setting up key file for SSH connection to EC2
       run: |
         echo "${{ secrets.SSH_KEY_FILE }}" > ./key_file.pem
         chmod 400 ./key_file.pem
 
     - name: Deploy to EC2 and Run Containers
       run: |
-        # Debug EC2 hostname
-        echo "EC2 Public IP: ${{ secrets.EC2_INSTANCE_ID }}"
+        echo "EC2 Public IP: ${{ secrets.EC2_PUBLIC_IP }}"
         
-        # Add host to known_hosts
         mkdir -p ~/.ssh
-        ssh-keyscan -H ${{ secrets.EC2_INSTANCE_ID }} >> ~/.ssh/known_hosts
+        ssh-keyscan -H ${{ secrets.EC2_PUBLIC_IP }} >> ~/.ssh/known_hosts
         
-        # SSH and deploy
-        ssh -i key_file.pem ec2-user@${{ secrets.EC2_INSTANCE_ID }} << 'EOF'
+        ssh -i key_file.pem ec2-user@${{ secrets.EC2_PUBLIC_IP }} << 'EOF'
+          set -e
+
           # Configure AWS credentials
           mkdir -p ~/.aws
           cat > ~/.aws/credentials << 'EOT'
@@ -67,28 +63,27 @@ jobs:
           region=us-east-1
           EOT
           chmod 600 ~/.aws/credentials
-    
+
           # Login to ECR
-          aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin 813634909417.dkr.ecr.us-east-1.amazonaws.com
-    
+          aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin ${{ steps.login-ecr.outputs.registry }}
+
           # Cleanup existing containers and network
           docker rm -f $(docker ps -aq) || true
           docker network rm mynetwork || true
-    
+
           # Create network
           docker network create mynetwork
-    
+
           # Pull latest images
-          docker pull 813634909417.dkr.ecr.us-east-1.amazonaws.com/mysql-repo:v1.0
-          docker pull 813634909417.dkr.ecr.us-east-1.amazonaws.com/webapp-repo:v1.0
-    
+          docker pull ${{ steps.login-ecr.outputs.registry }}/mysql-repo:v0.1
+          docker pull ${{ steps.login-ecr.outputs.registry }}/webapp-repo:v0.1
+
           # Start MySQL container
-          docker run -d --name sql --network mynetwork -e MYSQL_ROOT_PASSWORD=my-secret-pw -e MYSQL_DATABASE=mydb -p 3306:3306 ${{ steps.login-ecr.outputs.registry }}/mysql-repo:v1.0
-    
+          docker run -d --name sql --network mynetwork -e MYSQL_ROOT_PASSWORD=my-secret-pw -e MYSQL_DATABASE=mydb -p 3306:3306 ${{ steps.login-ecr.outputs.registry }}/mysql-repo:v0.1
+
           echo "Waiting for MySQL to initialize..."
           sleep 30
-          EOF
-          
+
           # Initialize database
           cat > init.sql << 'EOT'
           CREATE DATABASE IF NOT EXISTS mydb;
@@ -101,19 +96,20 @@ jobs:
               location VARCHAR(100)
           );
           EOT
-    
+
           docker cp init.sql sql:/init.sql
           docker exec sql mysql -uroot -pmy-secret-pw < init.sql
-    
+
           # Start Blue container
-          docker run -d --name blue-webapp --network mynetwork -e APP_COLOR=blue -e DBHOST=sql -e DBPORT=3306 -e DBUSER=root -e DBPWD=my-secret-pw -e DATABASE=mydb -p 8081:8080 ${{ steps.login-ecr.outputs.registry }}/webapp-repo:v1.0
-    
+          docker run -d --name blue-webapp --network mynetwork -e APP_COLOR=blue -e DBHOST=sql -e DBPORT=3306 -e DBUSER=root -e DBPWD=my-secret-pw -e DATABASE=mydb -p 8081:8080 ${{ steps.login-ecr.outputs.registry }}/webapp-repo:v0.1
+
           # Start Pink container
-          docker run -d --name pink-webapp --network mynetwork -e APP_COLOR=pink -e DBHOST=sql -e DBPORT=3306 -e DBUSER=root -e DBPWD=my-secret-pw -e DATABASE=mydb -p 8082:8080 ${{ steps.login-ecr.outputs.registry }}/webapp-repo:v1.0
-    
+          docker run -d --name pink-webapp --network mynetwork -e APP_COLOR=pink -e DBHOST=sql -e DBPORT=3306 -e DBUSER=root -e DBPWD=my-secret-pw -e DATABASE=mydb -p 8082:8080 ${{ steps.login-ecr.outputs.registry }}/webapp-repo:v0.1
+
           # Start Lime container
-          docker run -d --name lime-webapp --network mynetwork -e APP_COLOR=lime -e DBHOST=sql -e DBPORT=3306 -e DBUSER=root -e DBPWD=my-secret-pw -e DATABASE=mydb -p 8083:8080 ${{ steps.login-ecr.outputs.registry }}/webapp-repo:v1.0
-    
+          docker run -d --name lime-webapp --network mynetwork -e APP_COLOR=lime -e DBHOST=sql -e DBPORT=3306 -e DBUSER=root -e DBPWD=my-secret-pw -e DATABASE=mydb -p 8083:8080 ${{ steps.login-ecr.outputs.registry }}/webapp-repo:v0.1
+
           # Verify deployment
           echo "Checking running containers..."
           docker ps
+        EOF
