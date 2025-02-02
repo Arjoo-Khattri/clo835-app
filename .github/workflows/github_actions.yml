@@ -83,8 +83,13 @@ jobs:
           # Login to AWS ECR
           aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin $ECR_REGISTRY
 
+          # Remove Docker network only if it exists
+          if docker network inspect mynetwork >/dev/null 2>&1; then
+            docker network rm mynetwork
+          fi
+          
           # Create Docker network
-          docker network create mynetwork
+          docker network create mynetwork || true
 
           # Pull latest images from ECR
           docker pull $ECR_REGISTRY/mysql-repo:v1.0
