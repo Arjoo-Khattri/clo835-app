@@ -56,7 +56,7 @@ jobs:
         ssh-keyscan -H ${{ secrets.EC2_INSTANCE_ID }} >> ~/.ssh/known_hosts
 
         # SSH into EC2 instance and deploy
-        ssh -i key_file.pem -o StrictHostKeyChecking=no -t ec2-user@${{ secrets.EC2_INSTANCE_ID }} << 'EOF'
+        ssh -i key_file.pem -o StrictHostKeyChecking=no ec2-user@${{ secrets.EC2_INSTANCE_ID }} <<EOF
           echo "Connected to EC2 successfully"
 
           # Ensure Docker is installed
@@ -72,37 +72,26 @@ jobs:
             echo "Docker is already installed"
           fi
 
-          # Configure AWS credentials
-          mkdir -p ~/.aws
-          cat > ~/.aws/credentials <<EOT
-          [default]
-          aws_access_key_id=${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws_secret_access_key=${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws_session_token=${{ secrets.AWS_SESSION_TOKEN }}
-          region=us-east-1
-          EOT
-          chmod 600 ~/.aws/credentials
-
           # Login to AWS ECR
-          aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin ${{ steps.login-ecr.outputs.registry }}
+          aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin $ECR_REGISTRY
 
           # Cleanup old containers and network
-          docker rm -f $(docker ps -aq) || true
+          docker rm -f \$(docker ps -aq) || true
           docker network rm mynetwork || true
 
           # Create Docker network
           docker network create mynetwork
 
           # Pull latest images from ECR
-          docker pull ${{ steps.login-ecr.outputs.registry }}/mysql-repo:v1.0
-          docker pull ${{ steps.login-ecr.outputs.registry }}/webapp-repo:v1.0
+          docker pull $ECR_REGISTRY/mysql-repo:v1.0
+          docker pull $ECR_REGISTRY/webapp-repo:v1.0
 
           # Start MySQL container
           docker run -d --name sql --network mynetwork \
             -e MYSQL_ROOT_PASSWORD=my-secret-pw \
             -e MYSQL_DATABASE=mydb \
             -p 3306:3306 \
-            ${{ steps.login-ecr.outputs.registry }}/mysql-repo:v1.0
+            $ECR_REGISTRY/mysql-repo:v1.0
 
           echo "Waiting for MySQL to initialize..."
           sleep 30
@@ -114,27 +103,24 @@ jobs:
             -e DBUSER=root -e DBPWD=my-secret-pw \
             -e DATABASE=mydb \
             -p 8081:8080 \
-            ${{ steps.login-ecr.outputs.registry }}/webapp-repo:v1.0
-          # Start Pink container
+            $ECR_REGISTRY/webapp-repo:v1.0
+
           docker run -d --name pink-webapp --network mynetwork \
             -e APP_COLOR=pink \
             -e DBHOST=sql -e DBPORT=3306 \
             -e DBUSER=root -e DBPWD=my-secret-pw \
             -e DATABASE=mydb \
             -p 8082:8080 \
-            ${{ steps.login-ecr.outputs.registry }}/webapp-repo:v1.0
+            $ECR_REGISTRY/webapp-repo:v1.0
 
-          # Start Lime container
           docker run -d --name lime-webapp --network mynetwork \
             -e APP_COLOR=lime \
             -e DBHOST=sql -e DBPORT=3306 \
             -e DBUSER=root -e DBPWD=my-secret-pw \
             -e DATABASE=mydb \
             -p 8083:8080 \
-            ${{ steps.login-ecr.outputs.registry }}/webapp-repo:v1.0
+            $ECR_REGISTRY/webapp-repo:v1.0
 
-          # Verify running containers
           echo "Running containers:"
           docker ps
-          EOF
-
+        EOF
