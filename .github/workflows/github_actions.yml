@@ -60,16 +60,13 @@ jobs:
           echo "Connected to EC2 successfully"
 
           mkdir -p ~/.aws
-          cat <<EOT > ~/.aws/credentials
-          [default]
-          aws_access_key_id=${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws_secret_access_key=${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws_session_token=${{ secrets.AWS_SESSION_TOKEN }}
-          region=us-east-1
-          EOT
-
+          echo "[default]" > ~/.aws/credentials
+          echo "aws_access_key_id=${{ secrets.AWS_ACCESS_KEY_ID }}" >> ~/.aws/credentials
+          echo "aws_secret_access_key=${{ secrets.AWS_SECRET_ACCESS_KEY }}" >> ~/.aws/credentials
+          echo "aws_session_token=${{ secrets.AWS_SESSION_TOKEN }}" >> ~/.aws/credentials
+          echo "region=us-east-1" >> ~/.aws/credentials
           chmod 600 ~/.aws/credentials
-          
+
           # Ensure Docker is installed
           if ! command -v docker &> /dev/null
           then
