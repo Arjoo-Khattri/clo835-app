@@ -54,7 +54,7 @@ jobs:
         chmod 600 assignment1.pem
     
         # SSH and deploy
-        ssh -o StrictHostKeyChecking=no -i assignment1.pem ec2-user@${{ secrets.EC2_PUBLIC_IP }} '
+        ssh -o StrictHostKeyChecking=no -i assignment1.pem ec2-user@${{ secrets.EC2_PUBLIC_IP }} << 'EOF'
           # Configure AWS credentials
           mkdir -p ~/.aws
           echo "[default]
@@ -140,3 +140,4 @@ jobs:
           # Check running containers
           echo "Verifying deployment..."
           docker ps
+          EOF
