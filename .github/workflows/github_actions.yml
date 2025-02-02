@@ -115,9 +115,26 @@ jobs:
             -e DATABASE=mydb \
             -p 8081:8080 \
             ${{ steps.login-ecr.outputs.registry }}/webapp-repo:v1.0
+          # Start Pink container
+          docker run -d --name pink-webapp --network mynetwork \
+            -e APP_COLOR=pink \
+            -e DBHOST=sql -e DBPORT=3306 \
+            -e DBUSER=root -e DBPWD=my-secret-pw \
+            -e DATABASE=mydb \
+            -p 8082:8080 \
+            ${{ steps.login-ecr.outputs.registry }}/webapp-repo:v1.0
 
+          # Start Lime container
+          docker run -d --name lime-webapp --network mynetwork \
+            -e APP_COLOR=lime \
+            -e DBHOST=sql -e DBPORT=3306 \
+            -e DBUSER=root -e DBPWD=my-secret-pw \
+            -e DATABASE=mydb \
+            -p 8083:8080 \
+            ${{ steps.login-ecr.outputs.registry }}/webapp-repo:v1.0
+            
           # Verify running containers
           echo "Running containers:"
           docker ps
-    EOF
+          EOF
 
