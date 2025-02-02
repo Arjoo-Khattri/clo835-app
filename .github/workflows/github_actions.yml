@@ -59,6 +59,19 @@ jobs:
         ssh -i key_file.pem -o StrictHostKeyChecking=no -t ec2-user@${{ secrets.EC2_INSTANCE_ID }} << 'EOF'
           echo "Connected to EC2 successfully"
 
+          # Ensure Docker is installed
+          if ! command -v docker &> /dev/null
+          then
+            echo "Docker not found, installing now..."
+            sudo yum update -y
+            sudo yum install -y docker
+            sudo systemctl start docker
+            sudo systemctl enable docker
+            sudo usermod -aG docker ec2-user
+          else
+            echo "Docker is already installed"
+          fi
+
           # Configure AWS credentials
           mkdir -p ~/.aws
           cat > ~/.aws/credentials <<EOT
@@ -69,49 +82,32 @@ jobs:
           region=us-east-1
           EOT
           chmod 600 ~/.aws/credentials
-    
-          # Login to ECR
+
+          # Login to AWS ECR
           aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin ${{ steps.login-ecr.outputs.registry }}
-    
-          # Cleanup existing containers and network
+
+          # Cleanup old containers and network
           docker rm -f $(docker ps -aq) || true
           docker network rm mynetwork || true
-    
-          # Create a new Docker network
+
+          # Create Docker network
           docker network create mynetwork
-    
-          # Pull the latest images from ECR
+
+          # Pull latest images from ECR
           docker pull ${{ steps.login-ecr.outputs.registry }}/mysql-repo:v1.0
           docker pull ${{ steps.login-ecr.outputs.registry }}/webapp-repo:v1.0
-    
+
           # Start MySQL container
           docker run -d --name sql --network mynetwork \
             -e MYSQL_ROOT_PASSWORD=my-secret-pw \
             -e MYSQL_DATABASE=mydb \
             -p 3306:3306 \
             ${{ steps.login-ecr.outputs.registry }}/mysql-repo:v1.0
-    
+
           echo "Waiting for MySQL to initialize..."
           sleep 30
 
-          # Create SQL initialization script
-          cat > init.sql <<EOT
-          CREATE DATABASE IF NOT EXISTS mydb;
-          USE mydb;
-          CREATE TABLE IF NOT EXISTS employee (
-              emp_id VARCHAR(20) PRIMARY KEY,
-              first_name VARCHAR(100),
-              last_name VARCHAR(100),
-              primary_skill VARCHAR(100),
-              location VARCHAR(100)
-          );
-          EOT
-
-          # Copy and execute init script inside MySQL container
-          docker cp init.sql sql:/init.sql
-          docker exec sql mysql -uroot -pmy-secret-pw < init.sql
-
-          # Start Blue container
+          # Start WebApp Containers
           docker run -d --name blue-webapp --network mynetwork \
             -e APP_COLOR=blue \
             -e DBHOST=sql -e DBPORT=3306 \
@@ -120,25 +116,8 @@ jobs:
             -p 8081:8080 \
             ${{ steps.login-ecr.outputs.registry }}/webapp-repo:v1.0
 
-          # Start Pink container
-          docker run -d --name pink-webapp --network mynetwork \
-            -e APP_COLOR=pink \
-            -e DBHOST=sql -e DBPORT=3306 \
-            -e DBUSER=root -e DBPWD=my-secret-pw \
-            -e DATABASE=mydb \
-            -p 8082:8080 \
-            ${{ steps.login-ecr.outputs.registry }}/webapp-repo:v1.0
-
-          # Start Lime container
-          docker run -d --name lime-webapp --network mynetwork \
-            -e APP_COLOR=lime \
-            -e DBHOST=sql -e DBPORT=3306 \
-            -e DBUSER=root -e DBPWD=my-secret-pw \
-            -e DATABASE=mydb \
-            -p 8083:8080 \
-            ${{ steps.login-ecr.outputs.registry }}/webapp-repo:v1.0
-
-          # Verify deployment
-          echo "Checking running containers..."
+          # Verify running containers
+          echo "Running containers:"
           docker ps
-          EOF
+    EOF
+
